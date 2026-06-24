@@ -1,7 +1,7 @@
 {
   "name": "angular",
-  "description": "Angular development tooling for Claude Code. Includes the ngx-translate-xlsx skill for externalizing UI strings into @ngx-translate keys backed by an Excel sheet.",
-  "version": "0.4.0",
+  "description": "Angular development tooling for Claude Code. Bundles the official angular-developer skill (vendored from angular/angular, MIT) for Angular code generation and architectural guidance, plus the ngx-translate-xlsx skill for externalizing UI strings into @ngx-translate keys backed by an Excel sheet.",
+  "version": "0.5.0",
   "author": {
     "name": "Etienne Pasteur",
     "email": "me@etiennepasteur.com"
