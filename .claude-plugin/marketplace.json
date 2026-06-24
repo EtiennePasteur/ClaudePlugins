@@ -8,5 +8,12 @@
     "description": "Etienne Pasteur's personal Claude Code plugin marketplace.",
     "version": "0.1.0"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "angular",
+      "source": "./plugins/angular",
+      "description": "Angular development tooling. Includes the ngx-translate-xlsx skill for externalizing UI strings into @ngx-translate keys backed by an Excel sheet.",
+      "version": "0.1.0"
+    }
+  ]
 }
