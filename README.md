@@ -19,8 +19,13 @@ epasteur-claude-plugins/
 ├── .claude-plugin/
 │   └── marketplace.json    # marketplace manifest — lists available plugins
 ├── plugins/                # plugin sources live here
+├── doc/                    # standalone guides (not tied to a plugin)
 └── README.md
 ```
+
+## Good practices
+
+- [TypeScript LSP in Claude Code](doc/good-practices/typescript-lsp.md) — enable type-aware diagnostics and navigation in Claude Code.
 
 ## Adding a plugin
 
