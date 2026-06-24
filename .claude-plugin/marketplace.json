@@ -1,0 +1,12 @@
+{
+  "name": "epasteur-claude-plugins",
+  "owner": {
+    "name": "Etienne Pasteur",
+    "email": "me@etiennepasteur.com"
+  },
+  "metadata": {
+    "description": "Etienne Pasteur's personal Claude Code plugin marketplace.",
+    "version": "0.1.0"
+  },
+  "plugins": []
+}
