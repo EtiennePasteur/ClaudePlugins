@@ -13,7 +13,7 @@
       "name": "angular",
       "source": "./plugins/angular",
       "description": "Angular development tooling. Includes the ngx-translate-xlsx skill for externalizing UI strings into @ngx-translate keys backed by an Excel sheet.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }
