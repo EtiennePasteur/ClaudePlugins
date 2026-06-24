@@ -1,13 +1,13 @@
-# epasteur-claude-plugins
+# ClaudePlugins
 
 Etienne Pasteur's personal [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin marketplace.
 
-Repository: <https://github.com/EtiennePasteur/epasteur-claude-plugins>
+Repository: <https://github.com/EtiennePasteur/ClaudePlugins>
 
 ## Use this marketplace
 
 ```bash
-/plugin marketplace add EtiennePasteur/epasteur-claude-plugins
+/plugin marketplace add EtiennePasteur/ClaudePlugins
 ```
 
 Then browse and install plugins with `/plugin`.
@@ -15,7 +15,7 @@ Then browse and install plugins with `/plugin`.
 ## Repository layout
 
 ```
-epasteur-claude-plugins/
+ClaudePlugins/
 ├── .claude-plugin/
 │   └── marketplace.json    # marketplace manifest — lists available plugins
 ├── plugins/                # plugin sources live here
@@ -68,5 +68,5 @@ epasteur-claude-plugins/
 
    ```bash
    claude plugin validate .
-   /plugin marketplace update epasteur-claude-plugins
+   /plugin marketplace update ClaudePlugins
    ```
