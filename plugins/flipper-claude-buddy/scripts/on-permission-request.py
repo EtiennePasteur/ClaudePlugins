@@ -12,6 +12,14 @@ TIMEOUT = 60  # seconds to wait for user decision on Flipper
 
 
 def send_to_bridge(request: dict) -> dict:
+    """Send a request and block until the bridge answers.
+
+    The pid rides along so the bridge can tell a live wait from an abandoned
+    one: when the user answers in the terminal instead, Claude Code kills this
+    hook, and the pid going away is the bridge's only signal to take the
+    prompt off the Flipper's screen.
+    """
+    request = {**request, "pid": os.getpid()}
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(TIMEOUT)
     s.connect(SOCKET_PATH)
@@ -22,18 +30,19 @@ def send_to_bridge(request: dict) -> dict:
     return json.loads(resp.decode())
 
 
-def single_choice_question(tool_input: dict):
-    """Return (question, labels) when the call is a single-select, single
-    question with 2-4 options — the only shape the Flipper can answer.
+def flipper_question(tool_input: dict):
+    """Return the single question the Flipper can answer, when the call is
+    one question with 2-4 options — single- or multi-select.
 
-    Anything else (several questions, multiSelect) still has an answer shape
-    the device cannot express, so it falls through to Claude's own dialog.
+    A call carrying several questions needs one screen per question and an
+    answer map the device has no way to assemble, so it still falls through
+    to Claude's own dialog.
     """
     questions = tool_input.get("questions")
     if not isinstance(questions, list) or len(questions) != 1:
         return None
     question = questions[0]
-    if not isinstance(question, dict) or question.get("multiSelect"):
+    if not isinstance(question, dict):
         return None
     options = question.get("options")
     if not isinstance(options, list) or not 2 <= len(options) <= 4:
@@ -66,15 +75,18 @@ def handle_question(tool_input: dict):
     The tool itself is a pass-through: whatever ``answers`` map its input
     carries is what gets reported back to Claude, so filling that map here is
     what turns a button press on the device into the user's answer. Keys are
-    the question text verbatim; the value is the chosen option's label.
+    the question text verbatim; the value is the chosen option's label — or,
+    for a multi-select question, the chosen labels joined by ", ", which is
+    how the terminal dialog encodes them.
 
     Returns (rather than exiting) when the call cannot be served from the
     device, leaving the caller to fall back to the normal dialog.
     """
-    parsed = single_choice_question(tool_input)
+    parsed = flipper_question(tool_input)
     if parsed is None:
         return
     question, labels = parsed
+    multi = bool(question.get("multiSelect"))
 
     try:
         result = send_to_bridge({
@@ -82,6 +94,7 @@ def handle_question(tool_input: dict):
             "header": question.get("header") or "",
             "question": question["question"],
             "options": labels,
+            "multi": multi,
         })
     except Exception:
         return
@@ -93,13 +106,22 @@ def handle_question(tool_input: dict):
         # no_flipper, timeout, busy, error — fall back to normal dialog
         return
 
-    index = result.get("index")
-    if not isinstance(index, int) or not 0 <= index < len(labels):
-        return
+    if multi:
+        indices = result.get("indices")
+        if not isinstance(indices, list) or not indices:
+            return
+        if not all(isinstance(i, int) and 0 <= i < len(labels) for i in indices):
+            return
+        answer = ", ".join(labels[i] for i in indices)
+    else:
+        index = result.get("index")
+        if not isinstance(index, int) or not 0 <= index < len(labels):
+            return
+        answer = labels[index]
 
     updated_input = {
         "questions": tool_input["questions"],
-        "answers": {question["question"]: labels[index]},
+        "answers": {question["question"]: answer},
     }
     if "metadata" in tool_input:
         updated_input["metadata"] = tool_input["metadata"]

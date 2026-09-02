@@ -16,6 +16,10 @@ from .voice import DictationBackend, create_backend as create_dictation_backend
 log = logging.getLogger(__name__)
 
 
+# Returned by _wait_prompt when the hook that asked the question is gone.
+CLIENT_GONE = object()
+
+
 class Daemon:
     def __init__(self, transport: Transport, dictation: DictationBackend | None = None, input_backend: InputBackend | None = None):
         self.serial = SerialConnection(transport)
@@ -164,12 +168,21 @@ class Daemon:
                 await self._send_keystroke("escape")
 
         elif msg_type == "ask_resp":
+            # Single-select answers carry "idx"; multi-select ones a "sel"
+            # bitmask of the ticked options.
             index = data.get("idx", -1)
+            marks = data.get("sel")
             esc = data.get("esc", False)
-            log.info("Flipper ask_resp: idx=%s esc=%s future=%s",
-                     index, esc, self._ask_future is not None)
+            log.info("Flipper ask_resp: idx=%s sel=%s esc=%s future=%s",
+                     index, marks, esc, self._ask_future is not None)
             if self._ask_future and not self._ask_future.done():
-                self._ask_future.set_result({"ask": True} if esc else {"index": index})
+                if esc:
+                    result = {"ask": True}
+                elif isinstance(marks, int):
+                    result = {"indices": [i for i in range(32) if marks & (1 << i)]}
+                else:
+                    result = {"index": index}
+                self._ask_future.set_result(result)
 
         elif msg_type == "pong":
             if not self._menu_sent:
@@ -182,6 +195,51 @@ class Daemon:
                     await self.serial.send(menu_bytes)
                 if self._claude_connected:
                     await self.serial.send(protocol.state_msg(True))
+
+    async def _client_gone(self, pid: int | None) -> None:
+        """Resolve once the hook process that asked is gone.
+
+        The IPC socket cannot tell us this: the hook shuts its write side down
+        as soon as it has sent the request, so the daemon already sees EOF
+        while the hook is very much alive and waiting for an answer. Watching
+        the pid is what catches the case that matters — the user answered in
+        the terminal instead, and Claude Code killed the hook.
+        """
+        if not pid:
+            await asyncio.Event().wait()  # nothing to watch; wait forever
+        while True:
+            await asyncio.sleep(0.25)
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            except PermissionError:
+                pass  # someone else's pid — assume it is still alive
+
+    async def _wait_prompt(self, future: asyncio.Future, pid: int | None,
+                           timeout: float = 60.0):
+        """Wait for the Flipper's answer, giving up early if the asking hook
+        dies. Returns the future's result, or CLIENT_GONE; raises
+        asyncio.TimeoutError like the plain wait_for it replaces."""
+        watcher = asyncio.create_task(self._client_gone(pid))
+        try:
+            done, _ = await asyncio.wait(
+                {future, watcher}, timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                raise asyncio.TimeoutError
+            if future in done:
+                return future.result()
+            return CLIENT_GONE
+        finally:
+            watcher.cancel()
+
+    async def _dismiss_prompt(self) -> None:
+        """Take a prompt off the Flipper's screen. Without this it lingers
+        until some unrelated notify happens to switch the view."""
+        if self.serial.connected:
+            log.info("Closing prompt on Flipper (dismiss)")
+            await self.serial.send(protocol.dismiss_msg())
 
     async def _handle_ipc_action(self, request: dict) -> dict:
         action = request.get("action", "")
@@ -239,6 +297,7 @@ class Daemon:
         elif action == "permission_request":
             tool = request.get("tool", "Tool")[:21]
             detail = request.get("detail", "")[:21]
+            pid = request.get("pid")
             log.info("Permission request: %s %s", tool, detail)
 
             if self._perm_future and not self._perm_future.done():
@@ -259,12 +318,17 @@ class Daemon:
 
             try:
                 log.info("Waiting for Flipper response (60s timeout)")
-                result = await asyncio.wait_for(self._perm_future, timeout=60.0)
+                result = await self._wait_prompt(self._perm_future, pid)
+                if result is CLIENT_GONE:
+                    log.info("Permission answered elsewhere — closing on Flipper")
+                    await self._dismiss_prompt()
+                    return {"status": "ask"}
                 if result is None:
                     log.info("Permission cancelled (Flipper reset)")
                     return {"status": "no_flipper"}
                 if result.get("ask"):
                     log.info("Permission dismissed — deferring to Claude")
+                    await self._dismiss_prompt()
                     return {"status": "ask"}
                 log.info("Permission result: %s", result)
                 return {
@@ -274,6 +338,7 @@ class Daemon:
                 }
             except asyncio.TimeoutError:
                 log.info("Permission timed out")
+                await self._dismiss_prompt()
                 return {"status": "timeout"}
             finally:
                 self._perm_future = None
@@ -282,7 +347,10 @@ class Daemon:
             header = str(request.get("header", ""))
             question = str(request.get("question", ""))
             options = [str(o) for o in request.get("options", [])]
-            log.info("Question request: %s (%d options)", header or question, len(options))
+            multi = bool(request.get("multi", False))
+            pid = request.get("pid")
+            log.info("Question request: %s (%d options%s)",
+                     header or question, len(options), ", multi" if multi else "")
 
             if not options:
                 return {"status": "error"}
@@ -296,7 +364,7 @@ class Daemon:
                 return {"status": "no_flipper"}
 
             self._ask_future = asyncio.get_running_loop().create_future()
-            await self.serial.send(protocol.ask_msg(header, question, options))
+            await self.serial.send(protocol.ask_msg(header, question, options, multi))
 
             if not self.serial.connected:
                 log.info("Send failed, no Flipper")
@@ -305,13 +373,27 @@ class Daemon:
 
             try:
                 log.info("Waiting for Flipper answer (60s timeout)")
-                result = await asyncio.wait_for(self._ask_future, timeout=60.0)
+                result = await self._wait_prompt(self._ask_future, pid)
+                if result is CLIENT_GONE:
+                    log.info("Question answered elsewhere — closing on Flipper")
+                    await self._dismiss_prompt()
+                    return {"status": "ask"}
                 if result is None:
                     log.info("Question cancelled (Flipper reset)")
                     return {"status": "no_flipper"}
                 if result.get("ask"):
                     log.info("Question dismissed — deferring to Claude")
+                    await self._dismiss_prompt()
                     return {"status": "ask"}
+                if "indices" in result:
+                    indices = [i for i in result["indices"] if 0 <= i < len(options)]
+                    if not indices:
+                        log.warning("Question answer empty or out of range: %s",
+                                    result["indices"])
+                        return {"status": "error"}
+                    log.info("Question answered: %s",
+                             ", ".join(f"[{i}] {options[i]}" for i in indices))
+                    return {"status": "ok", "indices": indices}
                 index = result.get("index", -1)
                 if not isinstance(index, int) or not 0 <= index < len(options):
                     log.warning("Question answer out of range: %s", index)
@@ -320,6 +402,7 @@ class Daemon:
                 return {"status": "ok", "index": index}
             except asyncio.TimeoutError:
                 log.info("Question timed out")
+                await self._dismiss_prompt()
                 return {"status": "timeout"}
             finally:
                 self._ask_future = None
