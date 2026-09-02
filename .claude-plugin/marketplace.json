@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Etienne Pasteur's personal Claude Code plugin marketplace.",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
@@ -18,8 +18,8 @@
     {
       "name": "flipper-claude-buddy",
       "source": "./plugins/flipper-claude-buddy",
-      "description": "Turns a Flipper Zero into a physical remote and feedback device for Claude Code: sound, vibration and display on notifications, permission prompts answered from the device, and button-to-keystroke forwarding over USB or BLE. Vendored from a fork carrying a security hardening patch (private runtime dir, 0600 IPC socket).",
-      "version": "0.6.0"
+      "description": "Turns a Flipper Zero into a physical remote and feedback device for Claude Code: sound, vibration and display on notifications, permission prompts and multiple-choice questions answered from the device, and button-to-keystroke forwarding over USB or BLE. Vendored from a fork carrying a security hardening patch (private runtime dir, 0600 IPC socket).",
+      "version": "0.7.0"
     }
   ]
 }

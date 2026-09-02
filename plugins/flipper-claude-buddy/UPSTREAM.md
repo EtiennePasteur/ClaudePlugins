@@ -10,7 +10,7 @@ each sync. Fix things in the fork, push, then re-run the sync.
 | Vendored from | <https://github.com/EtiennePasteur/flipper-claude-buddy> |
 | Original upstream | <https://github.com/jxw1102/flipper-claude-buddy> |
 | Path | `plugin` |
-| Pinned commit | `ae7fa13d989054dd07b2109cac8af603d42c52cd` |
+| Pinned commit | `ae7d276edc5f9c9a687aefeb82b4e474272f860e` |
 | License | MIT — see [`LICENSE`](./LICENSE) (Copyright jxw1102) |
 
 The fork carries a security hardening patch not present upstream: runtime

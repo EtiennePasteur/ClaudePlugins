@@ -25,6 +25,7 @@ class Daemon:
         self._dictating = False
         self._claude_connected = False
         self._perm_future: asyncio.Future | None = None
+        self._ask_future: asyncio.Future | None = None
         self._menu_sent = False
         self._cmd_map: dict[str, str] = {}  # truncated -> full command
         self._space_repeat_task: asyncio.Task | None = None
@@ -51,10 +52,13 @@ class Daemon:
                     log.warning("Failed to cache BT name: %s", e)
             if bt_name:
                 _save_bt_name_to_plugin_config(bt_name)
-            # Flipper app just (re)started — cancel any pending permission request
+            # Flipper app just (re)started — cancel any pending prompt
             if self._perm_future and not self._perm_future.done():
                 log.info("Cancelling stale permission request")
                 self._perm_future.set_result(None)
+            if self._ask_future and not self._ask_future.done():
+                log.info("Cancelling stale question")
+                self._ask_future.set_result(None)
             await self.serial.send(
                 protocol.notify_msg("ready", vibro=True, text="Claude Code", subtext="Connected")
             )
@@ -159,6 +163,14 @@ class Daemon:
             if esc:
                 await self._send_keystroke("escape")
 
+        elif msg_type == "ask_resp":
+            index = data.get("idx", -1)
+            esc = data.get("esc", False)
+            log.info("Flipper ask_resp: idx=%s esc=%s future=%s",
+                     index, esc, self._ask_future is not None)
+            if self._ask_future and not self._ask_future.done():
+                self._ask_future.set_result({"ask": True} if esc else {"index": index})
+
         elif msg_type == "pong":
             if not self._menu_sent:
                 log.info("First pong — sending initial state")
@@ -178,6 +190,9 @@ class Daemon:
             if self._perm_future and not self._perm_future.done():
                 log.info("Dismissing pending permission (deferring to Claude)")
                 self._perm_future.set_result({"ask": True})
+            if self._ask_future and not self._ask_future.done():
+                log.info("Dismissing pending question (deferring to Claude)")
+                self._ask_future.set_result({"ask": True})
             sound = request.get("sound", "alert")
             vibro = request.get("vibro", True)
             text = request.get("text", "")
@@ -262,6 +277,52 @@ class Daemon:
                 return {"status": "timeout"}
             finally:
                 self._perm_future = None
+
+        elif action == "question_request":
+            header = str(request.get("header", ""))
+            question = str(request.get("question", ""))
+            options = [str(o) for o in request.get("options", [])]
+            log.info("Question request: %s (%d options)", header or question, len(options))
+
+            if not options:
+                return {"status": "error"}
+
+            if self._ask_future and not self._ask_future.done():
+                log.info("Question busy, rejecting")
+                return {"status": "busy"}
+
+            if not self.serial.connected:
+                log.info("No Flipper, falling back")
+                return {"status": "no_flipper"}
+
+            self._ask_future = asyncio.get_running_loop().create_future()
+            await self.serial.send(protocol.ask_msg(header, question, options))
+
+            if not self.serial.connected:
+                log.info("Send failed, no Flipper")
+                self._ask_future = None
+                return {"status": "no_flipper"}
+
+            try:
+                log.info("Waiting for Flipper answer (60s timeout)")
+                result = await asyncio.wait_for(self._ask_future, timeout=60.0)
+                if result is None:
+                    log.info("Question cancelled (Flipper reset)")
+                    return {"status": "no_flipper"}
+                if result.get("ask"):
+                    log.info("Question dismissed — deferring to Claude")
+                    return {"status": "ask"}
+                index = result.get("index", -1)
+                if not isinstance(index, int) or not 0 <= index < len(options):
+                    log.warning("Question answer out of range: %s", index)
+                    return {"status": "error"}
+                log.info("Question answered: [%d] %s", index, options[index])
+                return {"status": "ok", "index": index}
+            except asyncio.TimeoutError:
+                log.info("Question timed out")
+                return {"status": "timeout"}
+            finally:
+                self._ask_future = None
 
         return {"status": "unknown_action"}
 

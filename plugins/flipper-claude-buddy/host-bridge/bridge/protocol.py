@@ -2,6 +2,7 @@
 
 import json
 import time
+import unicodedata
 import uuid
 
 def make_id() -> str:
@@ -64,3 +65,31 @@ def perm_msg(tool: str, detail: str = "") -> bytes:
     if detail:
         d["detail"] = detail[:21]
     return encode("perm", d)
+
+
+def wire_safe(text: str, limit: int) -> str:
+    r"""Fold a string down to what the Flipper can parse and render.
+
+    ``protocol.c`` extracts strings with ``strstr``/``strchr`` and no escape
+    handling, so a quote, a backslash or a ``\uXXXX`` escape would truncate
+    the field mid-parse.  The LCD font is ASCII-only too.  Accented letters
+    are decomposed to their base form ("é" -> "e"); anything still outside
+    printable ASCII — and the ``|`` used as the option separator — is dropped.
+    """
+    kept = []
+    for ch in unicodedata.normalize("NFKD", text):
+        if unicodedata.combining(ch):
+            continue
+        # Blank rather than drop, so "Vert|pomme" doesn't become "Vertpomme".
+        kept.append(" " if ch in '"\\|' else ch if 32 <= ord(ch) < 127 else "")
+    return " ".join("".join(kept).split())[:limit]
+
+
+def ask_msg(header: str, question: str, options: list[str]) -> bytes:
+    """Multiple-choice question. Options are answered by index, so the
+    labels on the wire are display-only and may be folded/truncated."""
+    return encode("ask", {
+        "hdr": wire_safe(header, 21),
+        "q": wire_safe(question, 63),
+        "opts": "|".join(wire_safe(o, 26) for o in options),
+    })
