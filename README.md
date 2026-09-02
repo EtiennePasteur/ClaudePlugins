@@ -68,5 +68,10 @@ ClaudePlugins/
 
    ```bash
    claude plugin validate .
-   /plugin marketplace update ClaudePlugins
+   /plugin marketplace update etienne-pasteur-plugins
    ```
+
+   > The marketplace is named `etienne-pasteur-plugins` (the `name` field in
+   > `marketplace.json`), which differs from the repository name `ClaudePlugins`.
+   > Use the repo name to *add* the marketplace, the marketplace name to
+   > *update* it or to install from it (`<plugin>@etienne-pasteur-plugins`).
